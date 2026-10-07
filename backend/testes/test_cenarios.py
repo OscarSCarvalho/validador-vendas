@@ -5,8 +5,9 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 
-from app import criar_app
+from app import ChaveSecretaAusente, criar_app
 
 PRODUTO_PADRAO = {"nome": "Leitor de código de barras", "plataforma": "Nuvemshop",
                   "url_produto": "https://athos.exemplo.com/leitor",
@@ -790,6 +791,26 @@ class TestModoAfiliado(CenarioBase):
         self.assertEqual(resumo["veredito"]["codigo"], "escalar")
         self.assertEqual(resumo["alertas"], [])
         self.assertEqual(self.status_do_produto(), "escalar")
+
+
+class TestChaveSecreta(unittest.TestCase):
+    """Item G: sem SECRET_KEY de verdade, o sistema não sobe (antes usava a chave de exemplo sem avisar)."""
+
+    def test_sem_chave_ou_com_a_de_exemplo_nao_sobe(self):
+        for chave in ("", "troque-esta-chave"):
+            with self.subTest(chave=chave), mock.patch.dict(os.environ, {"SECRET_KEY": chave}):
+                with self.assertRaises(ChaveSecretaAusente):
+                    criar_app({"CAMINHO_BANCO": os.devnull})
+
+    def test_com_chave_de_verdade_sobe(self):
+        descritor, caminho = tempfile.mkstemp(suffix=".db")
+        os.close(descritor)
+        try:
+            with mock.patch.dict(os.environ, {"SECRET_KEY": "a1b2c3" * 8}):
+                self.assertEqual(criar_app({"CAMINHO_BANCO": caminho}).config["SECRET_KEY"], "a1b2c3" * 8)
+        finally:
+            os.remove(caminho)
+
 
 if __name__ == "__main__":
     unittest.main()

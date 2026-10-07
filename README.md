@@ -156,7 +156,7 @@ Veredito: **18 ou mais = Vale testar** · **13 a 17 = Testar com cautela** · **
 | Visual | **Bootstrap 5** | layout responsivo pronto (celular e computador) |
 | Gráficos | **Chart.js** + **react-chartjs-2** | gráfico de investimento × receita no Painel |
 | Ícones | SVG do Bootstrap Icons colado no código | sem biblioteca extra |
-| Testes | **unittest** (vem com o Python) | 149 testes, com cenários escritos em **Dado / Quando / Então** |
+| Testes | **unittest** (vem com o Python) | 164 testes, com cenários escritos em **Dado / Quando / Então** |
 
 **Dependências de propósito mínimas:**
 - Python: `flask`, `werkzeug`, `python-dotenv`.
@@ -273,7 +273,8 @@ pip install flask werkzeug python-dotenv
 copy .env.example .env        # Linux/Mac: cp .env.example .env
 ```
 
-Abra o `backend/.env` e troque o `SECRET_KEY` por uma chave aleatória. Para gerar uma:
+Abra o `backend/.env` e troque o `SECRET_KEY` por uma chave aleatória. **É obrigatório:** sem o `.env`, ou com a
+chave de exemplo, o backend não sobe e mostra como corrigir. Para gerar uma chave:
 
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
@@ -471,7 +472,8 @@ Os passos abaixo seguem a documentação da Nuvemshop. Confira lá se algo mudou
      -d grant_type=authorization_code -d code=<code>
    ```
    A resposta traz o `access_token` e o `user_id`, que é o número da loja.
-4. Cadastre o webhook de pedido pago apontando para o seu endereço público:
+4. Cadastre os webhooks de **pedido pago** e de **pedido cancelado** apontando para o seu endereço público
+   (o mesmo comando duas vezes, trocando o `event` para `order/cancelled` na segunda):
    ```bash
    curl -X POST https://api.nuvemshop.com.br/v1/<número da loja>/webhooks \
      -H "Authentication: bearer <access_token>" -H "Content-Type: application/json" \
@@ -486,16 +488,19 @@ Os passos abaixo seguem a documentação da Nuvemshop. Confira lá se algo mudou
 
 ### Shopify
 
-1. Em **Configurações → Notificações → Webhooks**, crie um webhook de **"Pagamento do pedido"** em JSON,
-   apontando para `https://SEU-ENDERECO/api/integracoes/shopify/webhook`.
+1. Em **Configurações → Notificações → Webhooks**, crie dois webhooks em JSON, **"Pagamento do pedido"** e
+   **"Cancelamento do pedido"**, os dois apontando para `https://SEU-ENDERECO/api/integracoes/shopify/webhook`.
 2. No `backend/.env`, preencha `SHOPIFY_SEGREDO_WEBHOOK` com o segredo mostrado nessa tela e
    `SHOPIFY_EMAIL_USUARIO` com o e-mail da sua conta.
 
 ### Cuidados
 
-- Só pedidos **pagos** contam. Cancelamentos não descontam.
+- Só pedidos **pagos** contam. Quando a loja avisa um **cancelamento**, a venda e o valor saem do dia em que
+  entraram, e o pedido aparece como "cancelado" no Painel. Estornos parciais não são descontados.
+- O dia do pedido é sempre o de **Brasília**, mesmo com o sistema num servidor em outro fuso.
 - Se um teste recebe pedidos pela integração, **não importe vendas e receita por CSV**, ou elas contam duas vezes.
-- Antes de lançar o dia pelo formulário, **atualize a página (F5)**, para não regravar as vendas com um número antigo.
+- Se chegar uma venda ou um cancelamento enquanto a página do teste está aberta, o **Salvar dia** não sobrescreve:
+  a tela avisa, atualiza os campos que mudaram (mantendo o que você digitou nos outros) e pede para salvar de novo.
 
 ---
 
@@ -506,13 +511,13 @@ cd backend
 python -m unittest discover -s testes -t . -v
 ```
 
-São **149 testes**:
+São **164 testes**:
 
 | Arquivo | O que verifica |
 |---|---|
 | `testes/test_regras.py` | margem, pontuação, progresso da validação, indicadores, funil, veredito e alertas |
 | `testes/test_importacao_csv.py` | separador, acentos, números, datas, sugestão de colunas, soma por dia |
-| `testes/test_integracoes.py` | assinatura dos webhooks, UTM, pedido repetido, pedido sem campanha (com a Nuvemshop simulada) |
+| `testes/test_integracoes.py` | assinatura dos webhooks, UTM, pedido repetido, pedido sem campanha, cancelamentos, avisos inválidos, fuso de Brasília e o formulário desatualizado (com a Nuvemshop simulada) |
 | `testes/test_cenarios.py` | cenários de uso pela API em **Dado / Quando / Então**, com um banco temporário |
 
 Exemplo de cenário:
@@ -533,7 +538,7 @@ cd ../backend && python app.py   # o Flask serve as telas e a API em http://127.
 ```
 
 Antes de expor na internet:
-- Use um `SECRET_KEY` forte no `.env`.
+- Use um `SECRET_KEY` forte no `.env` (sem ele o backend não sobe).
 - Sirva por **HTTPS**, que é obrigatório para os webhooks.
 - O `python app.py` usa o servidor de desenvolvimento do Flask. Para uso real, rode o app com um servidor
   WSGI de produção, o que exige instalar um pacote a mais.
@@ -582,7 +587,7 @@ Sem login, as rotas protegidas respondem `401`, e um produto de outro usuário r
 | GET | `/api/testes/<id>` | teste, produto, métricas por dia, totais, indicadores, funil, veredito e alertas |
 | PUT | `/api/testes/<id>` | mesmos campos + status (`em_andamento`/`encerrado`) · 200 · 400 |
 | DELETE | `/api/testes/<id>` | 204 |
-| PUT | `/api/testes/<id>/metricas/<AAAA-MM-DD>` | envia investimento, impressoes, cliques, visitas, carrinhos, vendas, receita · 200 resumo recalculado · 400 |
+| PUT | `/api/testes/<id>/metricas/<AAAA-MM-DD>` | envia investimento, impressoes, cliques, visitas, carrinhos, vendas, receita e, opcional, `base` (o dia como a tela carregou; `null` se era novo) · 200 resumo recalculado · 400 · 409 o dia mudou desde então (devolve `atual`) |
 | DELETE | `/api/testes/<id>/metricas/<AAAA-MM-DD>` | 200 resumo recalculado · 404 |
 | POST | `/api/testes/<id>/csv/previa` | multipart: `arquivo` + `mapeamento` (JSON, opcional) · colunas, dias e linhas ignoradas |
 | POST | `/api/testes/<id>/csv/importar` | mesmo envio · importados, novos, atualizados e resumo |
@@ -592,9 +597,9 @@ Sem login, as rotas protegidas respondem `401`, e um produto de outro usuário r
 | Método | Rota | Resposta |
 |---|---|---|
 | GET | `/api/painel` | produtos com status, última pontuação e teste mais recente (CPA, lucro, veredito, alertas) e a lista de testes |
-| POST | `/api/integracoes/nuvemshop/webhook` | sem login; confere `x-linkedstore-hmac-sha256` · 200 · 401 · 502 (tentar de novo) · 503 (não configurado) |
-| POST | `/api/integracoes/shopify/webhook` | sem login; confere `X-Shopify-Hmac-Sha256` · 200 · 401 · 503 |
-| GET | `/api/integracoes/pedidos` | últimos 50 pedidos recebidos e o teste ligado (ou sem campanha) |
+| POST | `/api/integracoes/nuvemshop/webhook` | sem login; `order/paid` ou `order/cancelled`; confere `x-linkedstore-hmac-sha256` · 200 · 400 (aviso inválido) · 401 · 502 (tentar de novo) · 503 (não configurado) |
+| POST | `/api/integracoes/shopify/webhook` | sem login; `orders/paid` ou `orders/cancelled`; confere `X-Shopify-Hmac-Sha256` · 200 · 400 (aviso inválido) · 401 · 503 |
+| GET | `/api/integracoes/pedidos` | últimos 50 pedidos recebidos, com o teste ligado (ou sem campanha) e `cancelado_em` |
 
 ---
 
@@ -617,8 +622,6 @@ Sem login, as rotas protegidas respondem `401`, e um produto de outro usuário r
 **Limitações conhecidas:**
 - **Integração ainda sem teste real.** A integração com a Nuvemshop foi testada com a API simulada. O teste com
   uma loja de verdade depende de criar o app na Nuvemshop e de ter um endereço público com HTTPS.
-- **Cancelamentos não descontam.** Pedidos cancelados depois de pagos continuam contando como venda.
-- **Formulário aberto pode regravar vendas.** Se a página do teste ficar aberta muito tempo e chegar uma venda
-  pelo webhook, salvar o dia pelo formulário regrava as vendas daquele dia. Atualize a página antes de lançar.
+- **Estornos parciais não descontam.** Só o cancelamento do pedido inteiro tira a venda do teste.
 - **Servidor de desenvolvimento.** O sistema roda no servidor de desenvolvimento do Flask; veja
   [Colocando em produção](#colocando-em-produção).

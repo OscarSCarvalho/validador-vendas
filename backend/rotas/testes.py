@@ -227,18 +227,41 @@ def excluir(teste_id):
     return "", 204
 
 
+def numeros_do_dia(metricas):
+    """Só os números de um dia (para comparar o que a tela carregou com o que está gravado)."""
+    if not isinstance(metricas, dict):
+        return None
+    try:
+        return {campo: round(float(metricas.get(campo) or 0), 2) for campo in CAMPOS_METRICAS}
+    except (TypeError, ValueError):
+        return None
+
+
+MENSAGEM_DIA_MUDOU = ("Os números deste dia mudaram depois que a página foi aberta (por exemplo, uma venda "
+                      "ou um cancelamento pela integração). Os campos foram atualizados: confira e salve de novo.")
+
+
 @bp.route("/<int:teste_id>/metricas/<data_metrica>", methods=["PUT"])
 @login_obrigatorio
 def salvar_metricas(teste_id, data_metrica):
+    """Grava o dia. Com "base" (o dia como a tela carregou; null se era novo), recusa com 409 quando o
+    dia mudou nesse meio-tempo, para não sobrescrever vendas que chegaram pelo webhook."""
     buscar_teste(teste_id)
     dia = ler_data(data_metrica)
     if dia is None:
         return jsonify(erros=["Data inválida. Use o formato AAAA-MM-DD."]), 400
-    dados, erros = validar_metricas(ler_json())
+    corpo = ler_json()
+    dados, erros = validar_metricas(corpo)
     if erros:
         return jsonify(erros=erros), 400
 
     conexao = obter_conexao()
+    if "base" in corpo:
+        gravado = conexao.execute("SELECT * FROM metricas_diarias WHERE teste_id = ? AND data = ?",
+                                  (teste_id, dia.isoformat())).fetchone()
+        gravado = dict(gravado) if gravado else None
+        if numeros_do_dia(corpo["base"]) != numeros_do_dia(gravado):
+            return jsonify(erros=[MENSAGEM_DIA_MUDOU], atual=gravado), 409
     conexao.execute(
         """INSERT INTO metricas_diarias (teste_id, data, investimento, impressoes, cliques,
                                          visitas, carrinhos, vendas, receita, origem)

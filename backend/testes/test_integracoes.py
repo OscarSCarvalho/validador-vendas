@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 from unittest import mock
 
 from app import criar_app
-from rotas.integracoes import (assinatura_valida_base64, assinatura_valida_hex, data_do_pedido,
-                               extrair_utm_campanha)
+from rotas.integracoes import (FUSO_BRASIL, assinatura_valida_base64, assinatura_valida_hex, data_do_pedido,
+                               extrair_utm_campanha, ler_valor)
 
 SEGREDO = "segredo-de-teste"
 CONFIG_NUVEMSHOP = {"NUVEMSHOP_SEGREDO_APP": SEGREDO, "NUVEMSHOP_TOKEN_ACESSO": "token-teste",
@@ -49,15 +49,25 @@ class TestFuncoesDoWebhook(unittest.TestCase):
     def test_pedido_sem_utm(self):
         self.assertIsNone(extrair_utm_campanha({"landing_url": "https://loja.com/", "total": "10"}))
 
-    def test_data_do_pedido_no_fuso_local(self):
-        utc = datetime(2026, 10, 6, 23, 30, tzinfo=timezone.utc)
-        self.assertEqual(data_do_pedido("2026-10-06T23:30:00+0000"), utc.astimezone().date().isoformat())
-        self.assertEqual(data_do_pedido("2026-10-06T14:33:00-03:00"),
-                         datetime(2026, 10, 6, 17, 33, tzinfo=timezone.utc).astimezone().date().isoformat())
-        self.assertEqual(data_do_pedido(None), datetime.now().date().isoformat())
+    def test_data_do_pedido_em_brasilia(self):
+        """Dado um pedido pago às 23h30 de Brasília (02h30 UTC do dia seguinte),
+        Então ele conta no dia de Brasília, qualquer que seja o fuso do servidor."""
+        self.assertEqual(data_do_pedido("2026-10-07T02:30:00+0000"), "2026-10-06")
+        self.assertEqual(data_do_pedido("2026-10-07T02:30:00Z"), "2026-10-06")
+        self.assertEqual(data_do_pedido("2026-10-07T03:00:00+00:00"), "2026-10-07")  # meia-noite em Brasília
+        self.assertEqual(data_do_pedido("2026-10-06T23:30:00-03:00"), "2026-10-06")
+        self.assertEqual(data_do_pedido("2026-10-06 23:59:00"), "2026-10-06")  # sem fuso: já é Brasília
+        self.assertEqual(data_do_pedido(None), datetime.now(FUSO_BRASIL).date().isoformat())
+
+    def test_valor_do_pedido(self):
+        self.assertEqual(ler_valor("199.90"), 199.9)
+        self.assertEqual(ler_valor(None), 0)
+        self.assertIsNone(ler_valor("abc"))
+        self.assertIsNone(ler_valor("nan"))
+        self.assertIsNone(ler_valor({"valor": 1}))
 
 
-class CenarioWebhook(unittest.TestCase):
+class BaseWebhook(unittest.TestCase):
     """Usuário oscar@exemplo.com com o leitor (margem R$ 90) e um teste 'leitor' de 01/10 a 07/10."""
 
     def setUp(self):
@@ -94,6 +104,8 @@ class CenarioWebhook(unittest.TestCase):
     def dia(self, data):
         metricas = self.cliente.get(f"/api/testes/{self.teste_id}").get_json()["metricas"]
         return next((m for m in metricas if m["data"] == data), None)
+
+class CenarioWebhook(BaseWebhook):
 
     def test_pedido_pago_soma_venda_no_dia_do_teste(self):
         """Dado o teste 'leitor' com R$ 30 investidos em 02/10,
@@ -193,6 +205,138 @@ class CenarioWebhook(unittest.TestCase):
         self.assertEqual([a["codigo"] for a in alertas], ["cpa_acima_da_margem", "conversao_caiu"])
         painel = self.cliente.get("/api/painel").get_json()
         self.assertEqual(len(painel["produtos"][0]["teste"]["alertas"]), 2)
+
+
+
+class CenarioCancelamentoEAvisosInvalidos(BaseWebhook):
+    """Itens D (cancelamentos) e F (avisos malformados)."""
+
+    def enviar_nuvemshop(self, corpo):
+        assinatura = hmac.new(SEGREDO.encode(), corpo, hashlib.sha256).hexdigest()
+        with mock.patch("rotas.integracoes.buscar_pedido_nuvemshop") as buscar:
+            resposta = self.cliente.post("/api/integracoes/nuvemshop/webhook", data=corpo,
+                                         headers={"x-linkedstore-hmac-sha256": assinatura})
+        return resposta, buscar
+
+    def enviar_shopify(self, corpo, topico="orders/paid"):
+        assinatura = base64.b64encode(hmac.new(SEGREDO.encode(), corpo, hashlib.sha256).digest()).decode()
+        return self.cliente.post("/api/integracoes/shopify/webhook", data=corpo, headers={
+            "X-Shopify-Hmac-Sha256": assinatura, "X-Shopify-Topic": topico})
+
+    def dia_02(self):
+        return self.dia(data_do_pedido("2026-10-02T15:00:00+0000"))
+
+    def test_cancelamento_desconta_a_venda(self):
+        """Dado um pedido pago de R$ 200 somado em 02/10, Quando a Nuvemshop avisa o cancelamento,
+        Então o dia volta a 0 venda e R$ 0, o investimento fica, e o pedido aparece cancelado."""
+        self.avisar_nuvemshop(1001)
+        resposta, buscar = self.avisar_nuvemshop(1001, evento="order/cancelled")
+        self.assertEqual(resposta.get_json(), {"situacao": "cancelado", "teste_id": self.teste_id})
+        buscar.assert_not_called()  # o cancelamento usa o que já está gravado
+        dia = self.dia_02()
+        self.assertEqual((dia["vendas"], dia["receita"], dia["investimento"]), (0, 0, 30))
+        self.assertIsNotNone(self.cliente.get("/api/integracoes/pedidos").get_json()[0]["cancelado_em"])
+        self.assertEqual(self.cliente.get("/api/produtos").get_json()[0]["status"], "em_teste")
+
+    def test_cancelamento_repetido_nao_desconta_duas_vezes(self):
+        """Dado 2 pedidos pagos no mesmo dia, Quando o cancelamento de um deles chega duas vezes,
+        Então o dia fica com 1 venda."""
+        self.avisar_nuvemshop(1001)
+        self.avisar_nuvemshop(1002)
+        self.avisar_nuvemshop(1001, evento="order/cancelled")
+        resposta, _ = self.avisar_nuvemshop(1001, evento="order/cancelled")
+        self.assertEqual(resposta.get_json(), {"situacao": "repetido"})
+        self.assertEqual((self.dia_02()["vendas"], self.dia_02()["receita"]), (1, 200))
+
+    def test_cancelamento_antes_do_pagamento(self):
+        """Dado que o cancelamento chegou antes do aviso de pagamento,
+        Quando o pagamento chega depois, Então ele não conta como venda."""
+        resposta, _ = self.avisar_nuvemshop(1001, evento="order/cancelled")
+        self.assertEqual(resposta.get_json(), {"situacao": "cancelado_sem_pagamento"})
+        resposta, _ = self.avisar_nuvemshop(1001)
+        self.assertEqual(resposta.get_json(), {"situacao": "repetido"})
+        self.assertEqual(self.dia_02()["vendas"], 0)
+
+    def test_cancelamento_nao_deixa_numeros_negativos(self):
+        """Dado um pedido somado e o dia corrigido à mão para 0 venda, Quando o cancelamento chega,
+        Então o dia continua em 0 (não fica negativo)."""
+        self.avisar_nuvemshop(1001)
+        self.cliente.put(f"/api/testes/{self.teste_id}/metricas/{data_do_pedido('2026-10-02T15:00:00+0000')}",
+                         json={"investimento": 30, "visitas": 50})
+        self.avisar_nuvemshop(1001, evento="order/cancelled")
+        self.assertEqual((self.dia_02()["vendas"], self.dia_02()["receita"]), (0, 0))
+
+    def test_cancelamento_na_shopify(self):
+        pedido = {"id": 555, "total_price": "200.00", "processed_at": "2026-10-03T10:00:00-03:00",
+                  "landing_site": "/products/leitor?utm_campaign=leitor"}
+        self.enviar_shopify(json.dumps(pedido).encode())
+        resposta = self.enviar_shopify(json.dumps(pedido).encode(), topico="orders/cancelled")
+        self.assertEqual(resposta.get_json(), {"situacao": "cancelado", "teste_id": self.teste_id})
+        self.assertEqual(self.dia("2026-10-03")["vendas"], 0)
+
+    def test_shopify_sem_id_responde_400(self):
+        """Dado um aviso da Shopify assinado mas sem o id do pedido, Então respondo 400 (antes era erro 500)."""
+        resposta = self.enviar_shopify(json.dumps({"total_price": "200.00"}).encode())
+        self.assertEqual(resposta.status_code, 400)
+        self.assertEqual(self.cliente.get("/api/integracoes/pedidos").get_json(), [])
+
+    def test_shopify_com_corpo_ou_valor_invalido_responde_400(self):
+        self.assertEqual(self.enviar_shopify(b"isto nao e json").status_code, 400)
+        self.assertEqual(self.enviar_shopify(b"[1, 2]").status_code, 400)
+        self.assertEqual(self.enviar_shopify(json.dumps({"id": 9, "total_price": "abc"}).encode()).status_code, 400)
+        self.assertEqual(self.cliente.get("/api/integracoes/pedidos").get_json(), [])
+
+    def test_nuvemshop_com_aviso_invalido_responde_400(self):
+        """Corpo que não é JSON, sem número do pedido ou sem número da loja: 400, sem buscar na API."""
+        for corpo in (b"isto nao e json", json.dumps({"event": "order/paid", "store_id": 123}).encode(),
+                      json.dumps({"event": "order/paid", "id": 1001}).encode(),
+                      json.dumps({"event": "order/paid", "id": "abc", "store_id": 123}).encode()):
+            with self.subTest(corpo=corpo):
+                resposta, buscar = self.enviar_nuvemshop(corpo)
+                self.assertEqual(resposta.status_code, 400)
+                buscar.assert_not_called()
+
+
+class CenarioDiaAlteradoPeloWebhook(BaseWebhook):
+    """Item C: o formulário não sobrescreve vendas que chegaram enquanto a página estava aberta."""
+
+    def caminho_02(self):
+        return f"/api/testes/{self.teste_id}/metricas/{data_do_pedido('2026-10-02T15:00:00+0000')}"
+
+    def test_formulario_desatualizado_recebe_409(self):
+        """Dado a página aberta com 02/10 sem vendas, Quando chega 1 venda pelo webhook e salvo o formulário
+        antigo, Então a API recusa (409), devolve o dia atual e a venda continua lá."""
+        base = self.dia(data_do_pedido("2026-10-02T15:00:00+0000"))
+        self.avisar_nuvemshop(1001)
+        resposta = self.cliente.put(self.caminho_02(), json={"investimento": 35, "visitas": 60, "base": base})
+        self.assertEqual(resposta.status_code, 409)
+        self.assertEqual(resposta.get_json()["atual"]["vendas"], 1)
+        dia = self.dia(data_do_pedido("2026-10-02T15:00:00+0000"))
+        self.assertEqual((dia["vendas"], dia["receita"], dia["investimento"]), (1, 200, 30))
+
+    def test_formulario_atualizado_salva(self):
+        """Dado a página recarregada depois da venda, Quando salvo, Então grava normalmente."""
+        self.avisar_nuvemshop(1001)
+        base = self.dia(data_do_pedido("2026-10-02T15:00:00+0000"))
+        resposta = self.cliente.put(self.caminho_02(), json={"investimento": 35, "visitas": 60, "vendas": 1,
+                                                             "receita": 200, "base": base})
+        self.assertEqual(resposta.status_code, 200)
+        self.assertEqual(self.dia(data_do_pedido("2026-10-02T15:00:00+0000"))["investimento"], 35)
+
+    def test_dia_novo_criado_por_outro_caminho(self):
+        """Dado um dia que não existia quando a página abriu (base null), Quando o webhook o cria antes,
+        Então o formulário recebe 409; sem webhook, o dia novo é gravado."""
+        caminho = f"/api/testes/{self.teste_id}/metricas/2026-10-05"
+        self.assertEqual(self.cliente.put(caminho, json={"investimento": 30, "base": None}).status_code, 200)
+        self.avisar_nuvemshop(1009, pedido_nuvemshop(1009, paid_at="2026-10-06T15:00:00+0000"))
+        caminho = f"/api/testes/{self.teste_id}/metricas/2026-10-06"
+        self.assertEqual(self.cliente.put(caminho, json={"investimento": 30, "base": None}).status_code, 409)
+
+    def test_sem_base_continua_gravando(self):
+        """Quem chama a API sem "base" (ex.: scripts) mantém o comportamento antigo."""
+        self.avisar_nuvemshop(1001)
+        resposta = self.cliente.put(self.caminho_02(), json={"investimento": 35})
+        self.assertEqual(resposta.status_code, 200)
 
 
 if __name__ == "__main__":

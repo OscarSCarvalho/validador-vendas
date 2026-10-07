@@ -85,5 +85,7 @@ CREATE TABLE IF NOT EXISTS pedidos_webhook (
     data          TEXT NOT NULL,
     valor         REAL NOT NULL,
     recebido_em   TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    -- Preenchido quando a loja avisa o cancelamento: o pedido deixa de contar como venda.
+    cancelado_em  TEXT,
     UNIQUE (plataforma, pedido_id)
 );

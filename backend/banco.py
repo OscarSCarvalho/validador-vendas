@@ -28,6 +28,9 @@ COLUNAS_ADICIONADAS = {
         ("modelo", "TEXT NOT NULL DEFAULT 'vendedor' CHECK (modelo IN ('vendedor', 'afiliado'))"),
         ("taxa_comissao", "REAL CHECK (taxa_comissao IS NULL OR (taxa_comissao > 0 AND taxa_comissao <= 100))"),
     ],
+    "pedidos_webhook": [
+        ("cancelado_em", "TEXT"),
+    ],
 }
 
 

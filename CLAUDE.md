@@ -151,6 +151,10 @@ Cada etapa tem: concluída (sim/não), observação e link de evidência.
 - Endpoint Flask para webhook de pedidos (começar pela Nuvemshop; deixar a Shopify preparada no mesmo formato).
 - Validar a assinatura do webhook com o segredo do `.env`.
 - Associar pedido ao teste pela `utm_campaign`; somar vendas e receita do dia (origem = `webhook`).
+- Cancelamento avisado pela loja (`order/cancelled`, `orders/cancelled`) desconta a venda e o valor do dia
+  e marca o pedido (`cancelado_em`). O dia do pedido é sempre o de Brasília. Aviso malformado responde 400.
+- O formulário do dia envia o dia como carregou (`base`); se ele mudou no servidor, a API responde 409 e não sobrescreve.
+- Sem `SECRET_KEY` no `.env` (ou com o de exemplo), o backend não sobe.
 - Alerta na tela quando o CPA passar da margem ou a conversão cair mais de 30% em relação à média do teste.
 - Opcional, só se eu pedir: usar n8n para buscar dados de anúncios e enviar ao sistema.
 

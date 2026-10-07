@@ -18,10 +18,16 @@ load_dotenv(os.path.join(PASTA_PROJETO, ".env"))
 # Build do React (npm run build). Em produção o Flask serve esta pasta.
 PASTA_DIST = os.path.join(PASTA_PROJETO, "..", "frontend", "dist")
 
+CHAVE_DE_EXEMPLO = "troque-esta-chave"  # a do .env.example: não serve para assinar sessões
+
+
+class ChaveSecretaAusente(RuntimeError):
+    """O .env não existe ou o SECRET_KEY ainda é o de exemplo."""
+
 
 def criar_app(config_extra=None):
     app = Flask(__name__, static_folder=None)
-    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "troque-esta-chave")
+    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "").strip()
     app.config["CAMINHO_BANCO"] = os.path.join(
         PASTA_PROJETO, os.getenv("CAMINHO_BANCO", "validador.db")
     )
@@ -29,6 +35,12 @@ def criar_app(config_extra=None):
     app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024  # uploads de CSV (o limite do arquivo é 2 MB)
     if config_extra:
         app.config.update(config_extra)
+    if app.config["SECRET_KEY"] in ("", CHAVE_DE_EXEMPLO):
+        if not app.config.get("TESTING"):
+            raise ChaveSecretaAusente(
+                "SECRET_KEY não configurado. Copie backend/.env.example para backend/.env e troque o SECRET_KEY "
+                "por uma chave aleatória (gere com: python -c \"import secrets; print(secrets.token_hex(32))\").")
+        app.config["SECRET_KEY"] = "chave-so-para-os-testes"
 
     iniciar_banco(app)
 

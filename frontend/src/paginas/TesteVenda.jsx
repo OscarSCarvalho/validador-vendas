@@ -129,17 +129,32 @@ export default function TesteVenda() {
     setMensagemDia("");
   }
 
+  /** Recarrega o teste e traz para o formulário só os campos que mudaram no servidor; o resto fica como digitado. */
+  async function juntarComOServidor() {
+    const novo = await buscarTeste(id).catch(() => null);
+    if (!novo) return;
+    const anterior = valoresDoDia(resumo.metricas, data);
+    const servidor = valoresDoDia(novo.metricas, data);
+    setResumo(novo);
+    setDia(Object.fromEntries(Object.keys(servidor).map((campo) => [
+      campo, servidor[campo] !== anterior[campo] ? servidor[campo] : dia[campo],
+    ])));
+  }
+
   async function salvarDia(evento) {
     evento.preventDefault();
     setSalvandoDia(true);
     setMensagemDia("");
+    // base: o dia como esta página o conhece. Se mudou no servidor (ex.: venda pelo webhook), a API responde 409.
+    const base = resumo.metricas.find((m) => m.data === data) ?? null;
     try {
-      const novo = await salvarMetricasDia(id, data, dia);
+      const novo = await salvarMetricasDia(id, data, { ...dia, base });
       setResumo(novo);
       setDia(valoresDoDia(novo.metricas, data));
       setErrosDia([]);
       setMensagemDia(`Dia ${formatarData(data)} salvo.`);
     } catch (erro) {
+      if (erro.status === 409) await juntarComOServidor();
       setErrosDia(erro.erros);
     } finally {
       setSalvandoDia(false);

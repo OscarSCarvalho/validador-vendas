@@ -183,7 +183,14 @@ export default function Painel() {
                         <tr key={`${pedido.plataforma}-${pedido.pedido_id}`}>
                           <td className="text-nowrap">{formatarData(pedido.data)}</td>
                           <td className="d-none d-sm-table-cell text-capitalize">{pedido.plataforma} #{pedido.pedido_id}</td>
-                          <td className="text-end">{formatarMoeda(pedido.valor)}</td>
+                          <td className="text-end text-nowrap">
+                            {pedido.cancelado_em ? (
+                              <>
+                                <span className="badge text-bg-danger me-1">cancelado</span>
+                                <s className="text-muted">{formatarMoeda(pedido.valor)}</s>
+                              </>
+                            ) : formatarMoeda(pedido.valor)}
+                          </td>
                           <td className="small">
                             {pedido.teste_id ? (
                               <Link to={`/testes/${pedido.teste_id}`}>{pedido.produto_nome} · {pedido.canal}</Link>
