@@ -1,0 +1,74 @@
+body {
+  background-color: #f5f6f8;
+}
+
+.margem-valor {
+  font-weight: 600;
+}
+
+/* Tela de login: painel azul à esquerda, formulário à direita */
+.painel-login {
+  background: linear-gradient(135deg, #0d6efd 0%, #0a3d91 100%);
+  color: #fff;
+}
+
+.painel-login .lista-recursos li + li {
+  margin-top: 0.85rem;
+}
+
+/* No celular (colunas empilhadas) não estica a faixa azul nem o formulário até o fim da tela */
+@media (max-width: 991.98px) {
+  .linha-login {
+    align-content: flex-start;
+  }
+}
+
+.formulario-login {
+  width: 100%;
+  max-width: 400px;
+}
+
+/* Ícone dentro do campo (à esquerda) e botão do olho (à direita) */
+.campo-com-icone {
+  position: relative;
+}
+
+.campo-com-icone .icone-campo {
+  position: absolute;
+  left: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--bs-secondary-color);
+  pointer-events: none;
+}
+
+.campo-com-icone .form-control.com-icone-esquerda {
+  padding-left: 2.5rem;
+}
+
+.campo-com-icone .form-control.com-botao-olho {
+  padding-right: 2.75rem;
+}
+
+.campo-com-icone .botao-olho {
+  position: absolute;
+  right: 0.35rem;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: var(--bs-secondary-color);
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+}
+
+.campo-com-icone .botao-olho:hover,
+.campo-com-icone .botao-olho:focus-visible {
+  color: var(--bs-primary);
+}
+
+/* O Edge tem um olho próprio no campo de senha: esconde para não aparecer dois */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
