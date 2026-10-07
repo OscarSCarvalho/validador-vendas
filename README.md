@@ -106,6 +106,10 @@ Todas as regras ficam em um único lugar no backend (`backend/regras.py`). A tel
 - No teste de venda: "visitas" = cliques no link de afiliado, não há carrinho, "receita" = comissão recebida
   e **lucro = comissão recebida − investimento**.
 - A campanha do teste é o **Sub_id** do link de afiliado (na Shopee a UTM não chega ao pedido).
+- **Veredito do afiliado** pelo que você recebeu de fato: razão = investimento ÷ comissão recebida.
+  - Menos de **3 dias** lançados → **Continue testando** (um clique ainda pode virar comissão em até 7 dias).
+  - A partir de 3 dias: até 70% → **Escalar** · até 100% → **Ajustar** · acima, ou sem nenhuma comissão → **Trocar**.
+  - Exemplo: R$ 90 investidos em 3 dias e R$ 135 de comissão = 66,7% → **Escalar** (lucro de R$ 45).
 
 **Pontuação** (5 critérios, nota de 1 a 5, total até 25)
 
@@ -134,7 +138,7 @@ Veredito: **18 ou mais = Vale testar** · **13 a 17 = Testar com cautela** · **
 - Sem vendas: se o investimento já passou da margem → **Trocar**; senão → **Continue testando**
 
 **Alertas**
-- O CPA acumulado do teste passou da margem por venda.
+- O CPA acumulado do teste passou da margem por venda (afiliado: o investimento passou da comissão recebida).
 - A conversão do último dia com visitas caiu mais de 30% em relação à média dos dias anteriores.
 
 ---
@@ -152,7 +156,7 @@ Veredito: **18 ou mais = Vale testar** · **13 a 17 = Testar com cautela** · **
 | Visual | **Bootstrap 5** | layout responsivo pronto (celular e computador) |
 | Gráficos | **Chart.js** + **react-chartjs-2** | gráfico de investimento × receita no Painel |
 | Ícones | SVG do Bootstrap Icons colado no código | sem biblioteca extra |
-| Testes | **unittest** (vem com o Python) | 138 testes, com cenários escritos em **Dado / Quando / Então** |
+| Testes | **unittest** (vem com o Python) | 149 testes, com cenários escritos em **Dado / Quando / Então** |
 
 **Dependências de propósito mínimas:**
 - Python: `flask`, `werkzeug`, `python-dotenv`.
@@ -502,7 +506,7 @@ cd backend
 python -m unittest discover -s testes -t . -v
 ```
 
-São **138 testes**:
+São **149 testes**:
 
 | Arquivo | O que verifica |
 |---|---|

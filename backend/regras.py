@@ -181,6 +181,37 @@ def calcular_veredito_teste(investimento, vendas, margem_unitaria):
     return {"codigo": codigo, "razao_cpa_margem": razao}
 
 
+DIAS_MINIMOS_AFILIADO = 3  # o clique gera comissão por até 7 dias: um dia só não decide
+
+
+def calcular_veredito_afiliado(investimento, comissao_recebida, dias_lancados):
+    """Afiliado: veredito pelo investimento ÷ comissão recebida (com vendas, é o mesmo que CPA ÷ comissão média).
+
+    Antes de 3 dias lançados = continue_testando.
+    Depois: razão ≤ 70% = escalar; até 100% = ajustar; acima, ou sem comissão nenhuma = trocar.
+    razao_cpa_margem alimenta a barra da tela (já aparece antes dos 3 dias); None sem comissão.
+    """
+    razao = round(investimento / comissao_recebida, 6) if comissao_recebida > 0 else None
+    if dias_lancados < DIAS_MINIMOS_AFILIADO:
+        codigo = "continue_testando"
+    elif razao is None or razao > LIMITE_AJUSTAR:
+        codigo = "trocar"
+    elif razao <= LIMITE_ESCALAR:
+        codigo = "escalar"
+    else:
+        codigo = "ajustar"
+    return {"codigo": codigo, "razao_cpa_margem": razao,
+            "dias_lancados": dias_lancados, "dias_minimos": DIAS_MINIMOS_AFILIADO}
+
+
+def calcular_veredito_do_modelo(metricas, margem_unitaria, modelo="vendedor"):
+    """Veredito do teste conforme o modelo do produto. metricas: os dias lançados do teste."""
+    totais = somar_metricas(metricas)
+    if modelo == "afiliado":
+        return calcular_veredito_afiliado(totais["investimento"], totais["receita"], len(metricas))
+    return calcular_veredito_teste(totais["investimento"], totais["vendas"], margem_unitaria)
+
+
 # Alertas do teste (Etapa 7).
 QUEDA_MAXIMA_CONVERSAO = 0.30  # alerta quando a conversão do último dia cai mais de 30%
 
@@ -198,7 +229,9 @@ def _percentual(valor, casas=1):
 def calcular_alertas(metricas, margem_unitaria, modelo="vendedor"):
     """Alertas do teste: CPA acima da margem e queda de conversão no último dia lançado.
 
-    metricas: dias do teste (com data, investimento, visitas e vendas).
+    Afiliado: no lugar do CPA, avisa quando o investimento passou da comissão recebida (teste no prejuízo).
+    Sem comissão recebida ainda, não avisa: ela pode chegar dias depois do clique.
+    metricas: dias do teste (com data, investimento, visitas, vendas e receita).
     A queda compara a conversão do último dia com visitas lançadas com a média dos dias anteriores
     (vendas ÷ visitas somadas). Dias sem visitas ficam de fora: um dia que só recebeu vendas pelo
     webhook, sem as visitas lançadas ainda, não tem conversão para comparar.
@@ -206,11 +239,17 @@ def calcular_alertas(metricas, margem_unitaria, modelo="vendedor"):
     alertas = []
     totais = somar_metricas(metricas)
     cpa = dividir(totais["investimento"], totais["vendas"])
-    if cpa is not None and cpa > margem_unitaria:
+    if modelo == "afiliado":
+        if 0 < totais["receita"] < totais["investimento"]:
+            alertas.append({
+                "codigo": "investimento_acima_da_comissao",
+                "mensagem": (f"O investimento ({_reais(totais['investimento'])}) passou da comissão recebida "
+                             f"({_reais(totais['receita'])}): o teste está no prejuízo."),
+            })
+    elif cpa is not None and cpa > margem_unitaria:
         alertas.append({
             "codigo": "cpa_acima_da_margem",
-            "mensagem": (f"O CPA ({_reais(cpa)}) passou da "
-                         f"{'comissão' if modelo == 'afiliado' else 'margem'} por venda ({_reais(margem_unitaria)})."),
+            "mensagem": f"O CPA ({_reais(cpa)}) passou da margem por venda ({_reais(margem_unitaria)}).",
         })
 
     dias = sorted((m for m in metricas if m["visitas"] > 0), key=lambda m: m["data"])

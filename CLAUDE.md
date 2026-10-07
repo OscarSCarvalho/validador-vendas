@@ -184,6 +184,11 @@ e copiar páginas da Shopee (scraping) viola os termos de uso; não fazer. Afili
 - Nota da margem do afiliado pela comissão em R$: ≥ R$ 20 = 5; ≥ R$ 10 = 4; ≥ R$ 5 = 3; ≥ R$ 2 = 2; abaixo = 1.
 - Teste de venda do afiliado: "visitas" = cliques no link de afiliado; sem carrinhos; "receita" = comissão recebida;
   lucro = comissão recebida − investimento. A campanha do teste é o **Sub_id** do link.
+- Veredito do teste do afiliado (substitui o CPA × margem): razão = investimento ÷ comissão recebida.
+  - Menos de 3 dias lançados → "Continue testando" (o clique gera comissão por até 7 dias).
+  - A partir de 3 dias: razão ≤ 70% → "Escalar"; até 100% → "Ajustar"; acima, ou sem nenhuma comissão → "Trocar".
+  - Alerta quando o investimento passa da comissão recebida (só depois que alguma comissão chegou).
+  - A pontuação continua usando a comissão estimada (preço × taxa).
 - Na validação, o gerador de UTM vira orientação de Sub_id para produtos de afiliado.
 
 ### Etapa 9: Importar relatórios do Painel de Afiliados (CSV)

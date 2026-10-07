@@ -735,23 +735,61 @@ class TestModoAfiliado(CenarioBase):
         produto_id = self.cliente.post("/api/produtos", json=PRODUTO_AFILIADO).get_json()["id"]
         self.assertEqual(self.cliente.get(f"/api/pontuacao/{produto_id}").get_json()["nota_margem"], 2)
 
+    def criar_teste_afiliado(self):
+        produto_id = self.cliente.post("/api/produtos", json=PRODUTO_AFILIADO).get_json()["id"]
+        return self.cliente.post("/api/testes", json=dict(TESTE_PADRAO, produto_id=produto_id,
+                                                           utm_campanha="camisetainsta")).get_json()["teste"]["id"]
+
+    def lancar_dia(self, teste_id, data, **metricas):
+        return self.cliente.put(f"/api/testes/{teste_id}/metricas/{data}", json=metricas).get_json()
+
+    def status_do_produto(self):
+        return self.cliente.get("/api/produtos").get_json()[0]["status"]
+
     def test_teste_de_venda_do_afiliado(self):
         """Dado um produto de afiliado com comissão de R$ 3,50 e um teste com Sub_id,
         Quando lanço R$ 30 investidos, 200 cliques no link, 2 pedidos e R$ 8,20 de comissão recebida,
-        Então o lucro é −R$ 21,80, o CPA é R$ 15 (acima da comissão) e o veredito é Trocar de produto."""
-        produto_id = self.cliente.post("/api/produtos", json=PRODUTO_AFILIADO).get_json()["id"]
-        teste_id = self.cliente.post("/api/testes", json=dict(TESTE_PADRAO, produto_id=produto_id,
-                                                               utm_campanha="camisetainsta")).get_json()["teste"]["id"]
-        resumo = self.cliente.put(f"/api/testes/{teste_id}/metricas/2026-10-01", json={
-            "investimento": 30, "impressoes": 8000, "cliques": 250, "visitas": 200, "vendas": 2,
-            "receita": "8,20"}).get_json()
+        Então o lucro é −R$ 21,80, aparece o alerta de prejuízo e, no 1º dia, o veredito é Continue testando."""
+        teste_id = self.criar_teste_afiliado()
+        resumo = self.lancar_dia(teste_id, "2026-10-01", investimento=30, impressoes=8000, cliques=250,
+                                 visitas=200, vendas=2, receita="8,20")
         self.assertEqual(resumo["indicadores"]["lucro"], -21.8)
         self.assertEqual(resumo["indicadores"]["cpa"], 15)
-        self.assertEqual(resumo["veredito"]["codigo"], "trocar")
+        self.assertEqual(resumo["veredito"]["codigo"], "continue_testando")
         self.assertEqual([e["etapa"] for e in resumo["funil"]], ["impressoes", "cliques", "visitas", "vendas"])
-        self.assertEqual(resumo["alertas"][0]["codigo"], "cpa_acima_da_margem")
+        self.assertEqual(resumo["alertas"][0]["codigo"], "investimento_acima_da_comissao")
         self.assertEqual(self.cliente.get("/api/painel").get_json()["produtos"][0]["modelo"], "afiliado")
 
+    def test_primeiro_dia_sem_pedido_nao_descarta(self):
+        """Dado um produto de afiliado com comissão de R$ 3,50,
+        Quando lanço o 1º dia com R$ 30 investidos e nenhum pedido,
+        Então o veredito é Continue testando e o produto continua Em teste (não Descartado)."""
+        teste_id = self.criar_teste_afiliado()
+        resumo = self.lancar_dia(teste_id, "2026-10-01", investimento=30, cliques=120, visitas=80)
+        self.assertEqual(resumo["veredito"]["codigo"], "continue_testando")
+        self.assertEqual(self.status_do_produto(), "em_teste")
+
+    def test_tres_dias_sem_comissao_trocar(self):
+        """Dado 3 dias com R$ 30 investidos por dia e nenhuma comissão,
+        Então o veredito é Trocar de produto e o produto vira Descartado."""
+        teste_id = self.criar_teste_afiliado()
+        for data in ("2026-10-01", "2026-10-02", "2026-10-03"):
+            resumo = self.lancar_dia(teste_id, data, investimento=30, visitas=80)
+        self.assertEqual(resumo["veredito"]["codigo"], "trocar")
+        self.assertEqual(self.status_do_produto(), "descartado")
+
+    def test_lucro_positivo_escalar(self):
+        """Dado 3 dias com R$ 30 investidos por dia (R$ 90) e R$ 135 de comissão recebida,
+        Então o lucro é R$ 45, a razão é 66,7% e o veredito é Escalar, mesmo com o CPA acima da comissão estimada."""
+        teste_id = self.criar_teste_afiliado()
+        for data in ("2026-10-01", "2026-10-02", "2026-10-03"):
+            resumo = self.lancar_dia(teste_id, data, investimento=30, visitas=100, vendas=5, receita=45)
+        self.assertEqual(resumo["indicadores"]["lucro"], 45)
+        self.assertEqual(resumo["indicadores"]["cpa"], 6)  # acima dos R$ 3,50 estimados
+        self.assertAlmostEqual(resumo["veredito"]["razao_cpa_margem"], 90 / 135, places=5)
+        self.assertEqual(resumo["veredito"]["codigo"], "escalar")
+        self.assertEqual(resumo["alertas"], [])
+        self.assertEqual(self.status_do_produto(), "escalar")
 
 if __name__ == "__main__":
     unittest.main()

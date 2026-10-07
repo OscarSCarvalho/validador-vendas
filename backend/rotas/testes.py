@@ -8,7 +8,7 @@ from banco import obter_conexao
 from importacao_csv import (CAMPOS_METRICAS, ErroCsv, converter_registros, ler_csv, sugerir_mapeamento,
                             validar_mapeamento)
 from regras import (STATUS_POR_VEREDITO, calcular_alertas, calcular_funil, calcular_indicadores,
-                    calcular_margem_produto, calcular_veredito_teste, somar_metricas)
+                    calcular_margem_produto, calcular_veredito_do_modelo, somar_metricas)
 from rotas.auth import ler_json, login_obrigatorio, texto
 from rotas.produtos import buscar_produto, converter_valor, produto_json
 
@@ -120,7 +120,7 @@ def resumir_teste(teste):
         "totais": totais,
         "indicadores": calcular_indicadores(totais, margem, modelo),
         "funil": calcular_funil(totais, modelo),
-        "veredito": calcular_veredito_teste(totais["investimento"], totais["vendas"], margem),
+        "veredito": calcular_veredito_do_modelo(metricas, margem, modelo),
         "alertas": calcular_alertas(metricas, margem, modelo),
     }
 
@@ -135,8 +135,8 @@ def atualizar_status_pelo_teste(teste_id):
         (teste_id,),
     ).fetchone()
     margem = calcular_margem_produto(dict(linha))["margem_unitaria"]
-    totais = somar_metricas(metricas_do_teste(teste_id))
-    status = STATUS_POR_VEREDITO[calcular_veredito_teste(totais["investimento"], totais["vendas"], margem)["codigo"]]
+    veredito = calcular_veredito_do_modelo(metricas_do_teste(teste_id), margem, linha["modelo"])
+    status = STATUS_POR_VEREDITO[veredito["codigo"]]
     conexao.execute("UPDATE produtos SET status = ? WHERE id = ?", (status, linha["id"]))
     conexao.commit()
     return status

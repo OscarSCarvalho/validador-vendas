@@ -1,6 +1,7 @@
 import unittest
 
-from regras import (calcular_comissao, calcular_margem_produto, nota_comissao, nota_margem_produto,
+from regras import (calcular_comissao, calcular_margem_produto, calcular_veredito_afiliado,
+                    calcular_veredito_do_modelo, nota_comissao, nota_margem_produto,
                     ETAPAS_VALIDACAO, calcular_alertas, calcular_funil, calcular_indicadores, calcular_margem,
                     calcular_pontuacao, calcular_progresso, calcular_veredito_teste, nota_margem,
                     somar_metricas)
@@ -152,9 +153,9 @@ class TestVereditoDoTeste(unittest.TestCase):
 
 
 
-def dia(data, investimento=0, visitas=0, vendas=0):
+def dia(data, investimento=0, visitas=0, vendas=0, receita=0):
     return {"data": data, "investimento": investimento, "impressoes": 0, "cliques": 0, "visitas": visitas,
-            "carrinhos": 0, "vendas": vendas, "receita": 0}
+            "carrinhos": 0, "vendas": vendas, "receita": receita}
 
 
 class TestAlertas(unittest.TestCase):
@@ -243,9 +244,61 @@ class TestModoAfiliado(unittest.TestCase):
                          ["Impressões", "Cliques no anúncio", "Cliques no link de afiliado", "Pedidos"])
         self.assertAlmostEqual(funil[3]["taxa"], 3 / 150)  # pedidos ÷ cliques no link
 
-    def test_alerta_fala_em_comissao(self):
-        alertas = calcular_alertas([dia("2026-10-01", 30, 50, 1)], 10.49, "afiliado")
-        self.assertEqual(alertas[0]["mensagem"], "O CPA (R$ 30,00) passou da comissão por venda (R$ 10,49).")
+    def test_alerta_quando_o_investimento_passa_da_comissao_recebida(self):
+        """Dado R$ 30 investidos e R$ 8,20 de comissão recebida, Então aparece o alerta de prejuízo."""
+        alertas = calcular_alertas([dia("2026-10-01", 30, 50, 2, 8.2)], 3.5, "afiliado")
+        self.assertEqual([a["codigo"] for a in alertas], ["investimento_acima_da_comissao"])
+        self.assertEqual(alertas[0]["mensagem"],
+                         "O investimento (R$ 30,00) passou da comissão recebida (R$ 8,20): o teste está no prejuízo.")
+
+    def test_afiliado_sem_comissao_ainda_nao_alerta(self):
+        """A comissão pode chegar dias depois do clique: sem comissão recebida, não há alerta de prejuízo."""
+        self.assertEqual(calcular_alertas([dia("2026-10-01", 30, 50, 0)], 3.5, "afiliado"), [])
+
+    def test_afiliado_no_lucro_nao_alerta(self):
+        """O CPA (R$ 3) passa da comissão estimada (R$ 1,05), mas a comissão recebida cobre o investimento."""
+        self.assertEqual(calcular_alertas([dia("2026-10-01", 30, 50, 10, 60)], 1.05, "afiliado"), [])
+
+
+class TestVereditoAfiliado(unittest.TestCase):
+    """Afiliado: investimento ÷ comissão recebida, só a partir de 3 dias lançados."""
+
+    def veredito(self, investimento, comissao, dias=3):
+        return calcular_veredito_afiliado(investimento, comissao, dias)["codigo"]
+
+    def test_primeiro_dia_sem_venda_continue_testando(self):
+        """Dado R$ 30 investidos no 1º dia e nenhum pedido, Então o veredito é Continue testando (não Trocar)."""
+        self.assertEqual(self.veredito(30, 0, dias=1), "continue_testando")
+        self.assertEqual(self.veredito(60, 0, dias=2), "continue_testando")
+
+    def test_tres_dias_sem_comissao_trocar(self):
+        """Dado R$ 90 investidos em 3 dias e nenhuma comissão, Então o veredito é Trocar."""
+        self.assertEqual(self.veredito(90, 0), "trocar")
+
+    def test_lucro_positivo_escalar(self):
+        """Dado R$ 30 investidos e R$ 60 de comissão recebida (lucro de R$ 30), Então o veredito é Escalar."""
+        resultado = calcular_veredito_afiliado(30, 60, 3)
+        self.assertEqual(resultado["codigo"], "escalar")
+        self.assertEqual(resultado["razao_cpa_margem"], 0.5)
+
+    def test_limites_de_70_e_100_por_cento(self):
+        self.assertEqual(self.veredito(70, 100), "escalar")    # 70% exato
+        self.assertEqual(self.veredito(71, 100), "ajustar")
+        self.assertEqual(self.veredito(90, 100), "ajustar")
+        self.assertEqual(self.veredito(100, 100), "ajustar")   # 100% exato
+        self.assertEqual(self.veredito(101, 100), "trocar")
+
+    def test_antes_de_3_dias_a_barra_ja_aparece(self):
+        resultado = calcular_veredito_afiliado(30, 8.2, 1)
+        self.assertEqual(resultado["codigo"], "continue_testando")
+        self.assertAlmostEqual(resultado["razao_cpa_margem"], 30 / 8.2, places=5)
+        self.assertEqual((resultado["dias_lancados"], resultado["dias_minimos"]), (1, 3))
+
+    def test_veredito_segue_o_modelo(self):
+        """Os mesmos dias: o vendedor usa CPA × margem; o afiliado, investimento × comissão recebida."""
+        dias = [dia("2026-10-01", 30, 100, 10, 60), dia("2026-10-02"), dia("2026-10-03")]
+        self.assertEqual(calcular_veredito_do_modelo(dias, 1.05, "afiliado")["codigo"], "escalar")
+        self.assertEqual(calcular_veredito_do_modelo(dias, 1.05, "vendedor")["codigo"], "trocar")
 
 
 if __name__ == "__main__":

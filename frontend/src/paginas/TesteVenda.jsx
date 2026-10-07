@@ -26,12 +26,20 @@ const CAMPOS_DIA_AFILIADO = [
   { campo: "vendas", rotulo: "Pedidos" },
   { campo: "receita", rotulo: "Comissão (R$)", dinheiro: true },
 ];
-const DESCRICOES_VEREDITO_AFILIADO = {
-  escalar: "O custo por venda está em até 70% da comissão. Aumente a verba aos poucos.",
-  ajustar: "O custo por venda está entre 70% e 100% da comissão. Ajuste o criativo, o público ou escolha uma oferta com comissão maior.",
-  trocar: "O custo por venda passou da comissão (ou o investimento sem vendas já passou da comissão).",
-  continue_testando: "Ainda sem vendas, mas o investimento não passou da comissão. Continue o teste.",
-};
+/** Afiliado: o veredito compara o investimento com a comissão recebida, a partir de alguns dias de teste. */
+function descricaoVereditoAfiliado({ codigo, razao_cpa_margem: razao, dias_lancados: lancados, dias_minimos: minimos }) {
+  const faltam = minimos - lancados;
+  return {
+    escalar: "O investimento está em até 70% da comissão recebida. Aumente a verba aos poucos.",
+    ajustar: "O investimento está entre 70% e 100% da comissão recebida. Ajuste o criativo, o público ou escolha uma oferta com comissão maior.",
+    trocar: razao === null
+      ? `${lancados} dias lançados sem nenhuma comissão. Troque de produto ou de oferta.`
+      : "O investimento passou da comissão recebida. Troque de produto ou de oferta.",
+    continue_testando: `O veredito sai com ${minimos} dias lançados (falta${faltam > 1 ? "m" : ""} ${faltam}): ` +
+      "um clique ainda pode virar comissão em até 7 dias. Continue o teste.",
+  }[codigo];
+}
+
 const DESCRICOES_VEREDITO = {
   escalar: "O custo por venda está em até 70% da margem. Aumente a verba aos poucos.",
   ajustar: "O custo por venda está entre 70% e 100% da margem. Ajuste o criativo, o preço ou a página.",
@@ -50,14 +58,15 @@ function valoresDoDia(metricas, data) {
 
 function BarraCpaMargem({ veredito, indicadores, produto, totais }) {
   const razao = veredito.razao_cpa_margem;
-  const palavra = produto.modelo === "afiliado" ? "comissão" : "margem";
+  const afiliado = produto.modelo === "afiliado";
+  if (afiliado && razao === null) {
+    return <p className="small mb-0">Nenhuma comissão recebida: investido {formatarMoeda(totais.investimento)}.</p>;
+  }
   if (razao === null) {
     return (
       <p className="small mb-0">
         {totais.vendas === 0
-          ? `Sem vendas: investido ${formatarMoeda(totais.investimento)} de uma ${palavra} de ${formatarMoeda(produto.margem_unitaria)} por venda.`
-          : produto.modelo === "afiliado"
-          ? "Comissão zerada: revise o preço e a comissão do produto."
+          ? `Sem vendas: investido ${formatarMoeda(totais.investimento)} de uma margem de ${formatarMoeda(produto.margem_unitaria)} por venda.`
           : "Margem do produto zerada ou negativa: revise o preço e o custo."}
       </p>
     );
@@ -67,8 +76,13 @@ function BarraCpaMargem({ veredito, indicadores, produto, totais }) {
   return (
     <div>
       <p className="small mb-2">
-        CPA de <strong>{formatarMoeda(indicadores.cpa)}</strong> = <strong>{formatarPercentual(razao)}</strong> da{" "}
-        {palavra} de {formatarMoeda(produto.margem_unitaria)}.
+        {afiliado ? (
+          <>Investimento de <strong>{formatarMoeda(totais.investimento)}</strong> = <strong>{formatarPercentual(razao)}</strong>{" "}
+            da comissão recebida de {formatarMoeda(totais.receita)}.</>
+        ) : (
+          <>CPA de <strong>{formatarMoeda(indicadores.cpa)}</strong> = <strong>{formatarPercentual(razao)}</strong> da{" "}
+            margem de {formatarMoeda(produto.margem_unitaria)}.</>
+        )}
       </p>
       <div className="position-relative pb-4">
         <div className="progress" style={{ height: "1rem" }}>
@@ -182,7 +196,6 @@ export default function TesteVenda() {
   const encerrado = teste.status === "encerrado";
   const afiliado = produto.modelo === "afiliado";
   const camposDia = afiliado ? CAMPOS_DIA_AFILIADO : CAMPOS_DIA;
-  const descricoes = afiliado ? DESCRICOES_VEREDITO_AFILIADO : DESCRICOES_VEREDITO;
 
   return (
     <>
@@ -268,7 +281,7 @@ export default function TesteVenda() {
           <div className={`border border-${cor} border-2 rounded p-3 mb-3 bg-${cor}-subtle`}>
             <div className="small text-muted">Veredito do teste</div>
             <div className={`fs-3 fw-bold text-${cor}-emphasis`}>{rotulo}</div>
-            <p className="small mb-3">{descricoes[veredito.codigo]}</p>
+            <p className="small mb-3">{afiliado ? descricaoVereditoAfiliado(veredito) : DESCRICOES_VEREDITO[veredito.codigo]}</p>
             <BarraCpaMargem veredito={veredito} indicadores={indicadores} produto={produto} totais={totais} />
           </div>
 
